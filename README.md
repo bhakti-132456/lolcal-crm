@@ -4,73 +4,87 @@ AXON is a high-performance, local-first CRM built with Tauri, React, and PocketB
 
 ## 🚀 Getting Started
 
-### Prerequisites
-- **Node.js**: v18 or later
-- **Rust**: Latest stable version (via [rustup](https://rustup.rs/))
-- **System Dependencies**:
-  - **macOS**: None (standard Xcode tools recommended)
-  - **Windows**: [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) (pre-installed on Windows 10/11)
+### 1. System Requirements
 
-### Installation
-1. Clone the repository:
-   ```bash
-   git clone <repository-url>
-   cd lolcal-crm
-   ```
-2. Install frontend dependencies:
-   ```bash
-   npm install
-   ```
+#### 🍎 macOS (Intel & Apple Silicon)
+- **Xcode Command Line Tools**: Run `xcode-select --install` in your terminal.
+- **Homebrew**: Recommended for managing dependencies. [brew.sh](https://brew.sh/)
+- **Node.js**: v18+ (Install via `brew install node`)
+- **Rust**:
+  ```bash
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+  ```
 
-## 🖥️ Platform Setup (Binaries)
+#### 🪟 Windows
+- **Microsoft C++ Build Tools**: [Download here](https://visualstudio.microsoft.com/visual-cpp-build-tools/). Select the "Desktop development with C++" workload during installation.
+- **WebView2**: Standard on Win 10/11. If missing, [download here](https://developer.microsoft.com/en-us/microsoft-edge/webview2/).
+- **Node.js**: v18+ (Use the MSI installer from [nodejs.org](https://nodejs.org/))
+- **Rust**: [Download and run rustup-init.exe](https://rustup.rs/)
 
-AXON relies on sidecar binaries located in `src-tauri/binaries`. You MUST provide the correct binaries for your operating system and architecture.
+### 2. Sidecar Binary Setup (CRITICAL)
 
-### Binary Naming Convention
-Binaries must follow the `[name]-[triple]` format.
+AXON uses external binaries (sidecars) for the database and AI features. You must place the correct versions in `src-tauri/binaries/`.
 
-| OS | Architecture | Triple |
-| :--- | :--- | :--- |
-| macOS (Intel) | x86_64 | `x86_64-apple-darwin` |
-| macOS (M1/M2/M3) | ARM64 | `aarch64-apple-darwin` |
-| Windows | x86_64 | `x86_64-pc-windows-msvc` |
+#### Identifying your Target Triple
+Run this command in your terminal to find your system's "triple":
+```bash
+rustc -vV | grep host | cut -d ' ' -f 2
+```
 
-### Required Sidecars
-Place these in `src-tauri/binaries/`:
-1. `pocketbase-[triple]` (e.g., `pocketbase-x86_64-pc-windows-msvc.exe`)
+Common triples:
+- **Newer Macs (M1/M2/M3)**: `aarch64-apple-darwin`
+- **Intel Macs**: `x86_64-apple-darwin`
+- **Windows (standard)**: `x86_64-pc-windows-msvc`
+
+#### Required Files
+Download/build and rename these files to include your triple:
+1. `pocketbase-[triple]` (e.g. `pocketbase-aarch64-apple-darwin`)
 2. `llama-server-[triple]`
 3. `whisper-stt-[triple]`
 
-> [!TIP]
-> You can download PocketBase from [pocketbase.io](https://pocketbase.io/docs/going-to-production/#self-hosting) and rename it to match your system.
+*Note: On Windows, ensure these files have the `.exe` extension AFTER the triple (e.g. `pocketbase-x86_64-pc-windows-msvc.exe`).*
 
-## 🛠️ Development & Launch
+### 3. Installation & Development
 
-### Quick Launch (macOS)
-Use the included launcher to clear ghost processes and start the environment:
+1. **Clone & Install**:
+   ```bash
+   git clone https://github.com/bhakti-132456/lolcal-crm.git
+   cd lolcal-crm
+   npm install
+   ```
+
+2. **Run in Development**:
+   ```bash
+   npm run tauri dev
+   ```
+
+3. **Production Build**:
+   ```bash
+   npm run tauri build
+   ```
+
+## 🖥️ Platform Tips
+
+### macOS Quick Launch
+We've included a script to handle ghost processes automatically:
 ```bash
+chmod +x Launch_AXON.command
 ./Launch_AXON.command
 ```
 
-### Standard Launch
-```bash
-npm run tauri dev
-```
+### Windows Troubleshooting
+- If you see `Error: Could not find "pocketbase-..."`, double-check that the file in `src-tauri/binaries/` exactly matches your `rustc -vV` host triple.
+- Ensure the `AXON_VAULT` folder has read/write permissions.
 
 ## 🏗️ Architecture: Sovereign Mode
-- **Vault (PocketBase)**: Runs on `127.0.0.1:9081`. Data is persisted in the `AXON_VAULT` directory.
-- **Brain (Llama)**: AI features run on `127.0.0.1:11435`.
-- **Proxy**: All frontend requests are proxied through the Rust backend for security and localized path resolution.
+- **Vault (PocketBase)**: Port `9081`. Local database storage.
+- **Brain (Llama/Whisper)**: Port `11435`. Local AI inference.
+- **Frontend**: Vite + React, communicatng via Tauri commands to the Rust core.
 
-## ❓ Troubleshooting
-
-### Data not appearing?
-Ensure the `AXON_VAULT` directory exists and has write permissions. Check the console for `403 Forbidden` errors; if they persist, run the schema migrations.
+## ❓ FAQ
 
 ### Port 9081 Busy?
-If you see a "Ghost instance detected" error, kill any hanging PocketBase processes:
-- **macOS/Linux**: `lsof -ti:9081 | xargs kill -9`
+If a ghost instance is detected:
+- **macOS**: `lsof -ti:9081 | xargs kill -9`
 - **Windows**: `taskkill /F /IM pocketbase.exe`
 
-### CSV Import Failures
-Make sure your CSV has a `firstName` (or `first_name`) and `email` column. The importer is case-insensitive and attempts to match various header formats.
