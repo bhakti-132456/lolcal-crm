@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "branchName": "main",
+  "worktreePath": "D:\\misc\\lolcal-crm",
+  "upstream": null,
+  "mergeBase": null,
+  "firstSeenHead": "914bdaeb49e0fe8c2ef5f0bf3fc4b54b824ab7e1",
+  "lastSeenHead": "914bdaeb49e0fe8c2ef5f0bf3fc4b54b824ab7e1",
+  "lastAnalyzedHead": "914bdaeb49e0fe8c2ef5f0bf3fc4b54b824ab7e1",
+  "stale": false,
+  "staleReason": null,
+  "staleSince": null,
+  "lifecycleEvent": null,
+  "createdAt": "2026-04-24T07:25:48.675Z",
+  "updatedAt": "2026-04-24T07:25:48.675Z"
+}

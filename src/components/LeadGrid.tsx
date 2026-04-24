@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getLeads, addLead, importCsvBatch, updateLead, Lead } from "../lib/db";
 import { ghostSyncPrompt } from "../lib/ghostSync";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import Papa from "papaparse";
 import { 
   Plus, 
@@ -22,11 +23,13 @@ export function LeadGrid({ onSelectRecord }: { onSelectRecord: (id: string) => v
   const [search, setSearch] = useState("");
   const [isEnriching, setIsEnriching] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [duplicateResolution, setDuplicateResolution] = useState<{ batch: any[]; duplicates: any[]; } | null>(null);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const [showAddModal, setShowAddModal] = useState(false);
   const [heartbeat, setHeartbeat] = useState<"connecting" | "active" | "failed">("connecting");
   const [vaultReady, setVaultReady] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const parentRef = useRef<HTMLDivElement>(null);
 
   const [newLead, setNewLead] = useState({ 
     name: "", 
@@ -68,6 +71,18 @@ export function LeadGrid({ onSelectRecord }: { onSelectRecord: (id: string) => v
     enabled: vaultReady,
     retry: 5,
     retryDelay: (attempt) => Math.min(attempt * 1000, 5000),
+  });
+
+  const filteredLeads = leads?.filter(l => 
+    `${l.name}`.toLowerCase().includes(search.toLowerCase()) ||
+    l.email.toLowerCase().includes(search.toLowerCase())
+  ) || [];
+
+  const rowVirtualizer = useVirtualizer({
+    count: filteredLeads.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 88,
+    overscan: 10,
   });
 
   const addLeadMutation = useMutation({
@@ -113,6 +128,35 @@ export function LeadGrid({ onSelectRecord }: { onSelectRecord: (id: string) => v
     }
   };
 
+  const doImport = async (finalBatch: any[], duplicateUpdates: any[]) => {
+     setIsImporting(true);
+     try {
+       if (finalBatch.length > 0) {
+         await importCsvBatch(finalBatch);
+       }
+       for (const update of duplicateUpdates) {
+          const { existing, updated, row } = update;
+          let oldMetadata = {};
+          try { oldMetadata = JSON.parse(existing.metadata || '{}'); } catch (e) {}
+          const newMetadata = JSON.stringify({ ...oldMetadata, ...row });
+          
+          await updateLead(existing.id, {
+             name: existing.name !== "Unknown" && existing.name ? existing.name : updated.name,
+             email: existing.email || updated.email,
+             company: existing.company || updated.company,
+             metadata: newMetadata
+          });
+       }
+       
+       alert(`Import Complete. ${finalBatch.length} added, ${duplicateUpdates.length} updated.`);
+       queryClient.invalidateQueries({ queryKey: ["leads"] });
+     } catch (e) {
+       alert("CSV Import failed: " + e);
+     }
+     setIsImporting(false);
+     setDuplicateResolution(null);
+  };
+
   const handleImportCSV = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -126,6 +170,7 @@ export function LeadGrid({ onSelectRecord }: { onSelectRecord: (id: string) => v
         setImportProgress({ current: 0, total: rows.length });
         
         let batch = [];
+        let duplicateBatch = [];
         for (let i = 0; i < rows.length; i++) {
           const row = rows[i];
           const fName = row.firstName || row.Firstname || row.first_name || row.Name?.split(' ')[0] || "";
@@ -134,25 +179,36 @@ export function LeadGrid({ onSelectRecord }: { onSelectRecord: (id: string) => v
           const company = row.company || row.Company || row.jobTitle || row.Title || "";
 
           if ((fName || row.Name) && email) {
-            batch.push({
-               name: (row.Name ? row.Name : `${fName} ${lName}`).trim() || "Unknown",
+            const name = (row.Name ? row.Name : `${fName} ${lName}`).trim() || "Unknown";
+            const newLead = {
+               name: name,
                email: email,
                company: company,
-               status: "New"
-            });
+               status: "New",
+               metadata: JSON.stringify(row)
+            };
+
+            const duplicate = leads?.find(l => 
+               (l.email && l.email.toLowerCase() === email.toLowerCase()) || 
+               (l.name && l.name.toLowerCase() === name.toLowerCase())
+            );
+
+            if (duplicate) {
+               duplicateBatch.push({ existing: duplicate, updated: newLead, row });
+            } else {
+               batch.push(newLead);
+            }
           }
           setImportProgress(prev => ({ ...prev, current: i + 1 }));
         }
         
-        try {
-           const count = await importCsvBatch(batch);
-           alert(`Import Complete. ${count} leads added to Vault.`);
-           queryClient.invalidateQueries({ queryKey: ["leads"] });
-        } catch (e) {
-           alert("CSV Import failed: " + e);
-        }
-
         setIsImporting(false);
+
+        if (duplicateBatch.length > 0) {
+           setDuplicateResolution({ batch, duplicates: duplicateBatch });
+        } else {
+           await doImport(batch, []);
+        }
       }
     });
   };
@@ -222,7 +278,7 @@ export function LeadGrid({ onSelectRecord }: { onSelectRecord: (id: string) => v
       </div>
 
       {/* Grid */}
-      <div className="flex-1 overflow-auto">
+      <div ref={parentRef} className="flex-1 overflow-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="border-b border-white/5 bg-white/[0.02]">
@@ -234,50 +290,58 @@ export function LeadGrid({ onSelectRecord }: { onSelectRecord: (id: string) => v
             </tr>
           </thead>
           <tbody className="divide-y divide-white/[0.03]">
-            {leads?.filter(l => 
-              `${l.name}`.toLowerCase().includes(search.toLowerCase()) ||
-              l.email.toLowerCase().includes(search.toLowerCase())
-            ).map((lead) => (
-              <tr 
-                key={lead.id} 
-                className="hover:bg-white/[0.02] group cursor-pointer transition-colors"
-                onClick={() => onSelectRecord(lead.id)}
-              >
-                <td className="px-8 py-6">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center border border-white/10 text-sm font-bold text-blue-400">
-                      {lead.name.substring(0, 2).toUpperCase()}
+            {rowVirtualizer.getVirtualItems().length > 0 && (
+              <tr style={{ height: `${rowVirtualizer.getVirtualItems()[0].start}px` }} />
+            )}
+            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+              const lead = filteredLeads[virtualRow.index];
+              return (
+                <tr 
+                  key={lead.id} 
+                  className="hover:bg-white/[0.02] group cursor-pointer transition-colors"
+                  onClick={() => onSelectRecord(lead.id)}
+                  ref={rowVirtualizer.measureElement}
+                  data-index={virtualRow.index}
+                >
+                  <td className="px-8 py-6">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center border border-white/10 text-sm font-bold text-blue-400">
+                        {lead.name.substring(0, 2).toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="text-sm font-semibold text-white">{lead.name}</div>
+                        <div className="text-[10px] text-white/30 mt-1 uppercase tracking-tighter italic">{lead.id}</div>
+                      </div>
                     </div>
-                    <div>
-                      <div className="text-sm font-semibold text-white">{lead.name}</div>
-                      <div className="text-[10px] text-white/30 mt-1 uppercase tracking-tighter italic">{lead.id}</div>
-                    </div>
-                  </div>
-                </td>
-                <td className="px-8 py-6">
-                  <div className="text-sm text-white font-medium">{lead.company || "General"}</div>
-                </td>
-                <td className="px-8 py-6">
-                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${
-                    lead.status === 'Qualified' ? 'bg-green-500/10 text-green-400 border border-green-500/20' :
-                    lead.status === 'Contacted' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
-                    'bg-white/5 text-white/40 border border-white/10'
-                  }`}>
-                    {lead.status || "New"}
-                  </span>
-                </td>
-                <td className="px-8 py-6 text-sm text-white/50 lowercase">{lead.email}</td>
-                <td className="px-8 py-6 text-right">
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); enrichLead(lead); }}
-                      disabled={isEnriching === lead.id}
-                      className="p-2.5 hover:bg-blue-500/20 rounded-xl text-white/20 hover:text-blue-400 transition-all"
-                    >
-                      {isEnriching === lead.id ? <Loader2 className="w-4 h-4 animate-spin"/> : <Sparkles className="w-4 h-4" />}
-                    </button>
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="px-8 py-6">
+                    <div className="text-sm text-white font-medium">{lead.company || "General"}</div>
+                  </td>
+                  <td className="px-8 py-6">
+                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${
+                      lead.status === 'Qualified' ? 'bg-green-500/10 text-green-400 border border-green-500/20' :
+                      lead.status === 'Contacted' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
+                      'bg-white/5 text-white/40 border border-white/10'
+                    }`}>
+                      {lead.status || "New"}
+                    </span>
+                  </td>
+                  <td className="px-8 py-6 text-sm text-white/50 lowercase">{lead.email}</td>
+                  <td className="px-8 py-6 text-right">
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); enrichLead(lead); }}
+                        disabled={isEnriching === lead.id}
+                        className="p-2.5 hover:bg-blue-500/20 rounded-xl text-white/20 hover:text-blue-400 transition-all"
+                      >
+                        {isEnriching === lead.id ? <Loader2 className="w-4 h-4 animate-spin"/> : <Sparkles className="w-4 h-4" />}
+                      </button>
+                  </td>
+                </tr>
+              );
+            })}
+            {rowVirtualizer.getVirtualItems().length > 0 && (
+              <tr style={{ height: `${rowVirtualizer.getTotalSize() - rowVirtualizer.getVirtualItems()[rowVirtualizer.getVirtualItems().length - 1].end}px` }} />
+            )}
           </tbody>
         </table>
       </div>
@@ -327,6 +391,32 @@ export function LeadGrid({ onSelectRecord }: { onSelectRecord: (id: string) => v
               >
                 {addLeadMutation.isPending ? <Loader2 className="w-5 h-5 animate-spin"/> : <CheckCircle2 className="w-5 h-5"/>}
                 Authorize & Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Duplicate Resolution Modal */}
+      {duplicateResolution && (
+        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-xl flex items-center justify-center p-6">
+          <div className="bg-studio-noir border border-white/10 rounded-2xl w-full max-w-md shadow-2xl p-8">
+            <h2 className="text-xl font-bold mb-4">Duplicate Records Found</h2>
+            <p className="text-sm text-white/60 mb-6">
+              We found {duplicateResolution.duplicates.length} records that match existing names or emails in your Vault.
+              Do you want to merge these records and populate any missing fields?
+            </p>
+            <div className="space-y-3">
+              <button 
+                onClick={() => doImport(duplicateResolution.batch, duplicateResolution.duplicates)}
+                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-500/20 transition-all"
+              >
+                Merge & Update Missing Fields
+              </button>
+              <button 
+                onClick={() => setDuplicateResolution(null)}
+                className="w-full text-white/40 hover:text-white font-bold py-3 text-sm transition-all"
+              >
+                Cancel Import Completely
               </button>
             </div>
           </div>

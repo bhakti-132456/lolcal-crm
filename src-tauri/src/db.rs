@@ -12,6 +12,7 @@ pub struct Lead {
     pub company: String,
     pub status: String,
     pub created_at: Option<String>,
+    pub metadata: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -24,6 +25,8 @@ pub struct ImportLead {
     pub company: String,
     #[serde(default)]
     pub status: String,
+    #[serde(default)]
+    pub metadata: Option<String>,
 }
 
 pub struct DbState {
@@ -37,7 +40,7 @@ pub fn init_db() -> SqlResult<Connection> {
     }
     
     // vault prep
-    let db_path = project_root.join("axon_v1.db");
+    let db_path = project_root.join("core").join("axon_v1.db");
     // Later you can change this to:
     // let db_path = Path::new("/Volumes/AXON_VAULT/axon_v1.db");
     
@@ -56,6 +59,8 @@ pub fn init_db() -> SqlResult<Connection> {
         )",
         [],
     )?;
+    
+    let _ = conn.execute("ALTER TABLE leads ADD COLUMN metadata TEXT", []);
     
     // Inject mock data if table is empty
     let count: i64 = conn.query_row("SELECT count(*) FROM leads", [], |row| row.get(0)).unwrap_or(0);
@@ -85,7 +90,7 @@ pub fn get_leads(state: State<'_, DbState>) -> Result<Vec<Lead>, String> {
     let conn_guard = state.conn.lock().unwrap();
     let conn = conn_guard.as_ref().ok_or("Database not initialized")?;
     
-    let mut stmt = conn.prepare("SELECT id, name, email, company, status, created_at FROM leads ORDER BY created_at DESC").map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare("SELECT id, name, email, company, status, created_at, metadata FROM leads ORDER BY created_at DESC").map_err(|e| e.to_string())?;
     
     let rows = stmt.query_map([], |row| {
         Ok(Lead {
@@ -95,6 +100,7 @@ pub fn get_leads(state: State<'_, DbState>) -> Result<Vec<Lead>, String> {
             company: row.get(3).unwrap_or_default(),
             status: row.get(4).unwrap_or_default(),
             created_at: Some(row.get(5).unwrap_or_default()),
+            metadata: row.get(6).unwrap_or_default(),
         })
     }).map_err(|e| e.to_string())?;
     
@@ -124,9 +130,25 @@ pub fn add_lead(state: State<'_, DbState>, name: String, email: String, company:
 }
 
 #[tauri::command]
-pub fn update_lead(state: State<'_, DbState>, id: String, company: Option<String>, status: Option<String>) -> Result<(), String> {
+pub fn update_lead(
+    state: State<'_, DbState>, 
+    id: String, 
+    name: Option<String>,
+    email: Option<String>,
+    company: Option<String>, 
+    status: Option<String>,
+    metadata: Option<String>
+) -> Result<(), String> {
     let conn_guard = state.conn.lock().unwrap();
     let conn = conn_guard.as_ref().ok_or("Database not initialized")?;
+    
+    if let Some(ref n) = name {
+        conn.execute("UPDATE leads SET name = ?1 WHERE id = ?2", params![n, id]).map_err(|e| e.to_string())?;
+    }
+    
+    if let Some(ref e) = email {
+        conn.execute("UPDATE leads SET email = ?1 WHERE id = ?2", params![e, id]).map_err(|e| e.to_string())?;
+    }
     
     if let Some(ref c) = company {
         conn.execute("UPDATE leads SET company = ?1 WHERE id = ?2", params![c, id]).map_err(|e| e.to_string())?;
@@ -135,6 +157,20 @@ pub fn update_lead(state: State<'_, DbState>, id: String, company: Option<String
     if let Some(ref s) = status {
          conn.execute("UPDATE leads SET status = ?1 WHERE id = ?2", params![s, id]).map_err(|e| e.to_string())?;
     }
+
+    if let Some(ref m) = metadata {
+         conn.execute("UPDATE leads SET metadata = ?1 WHERE id = ?2", params![m, id]).map_err(|e| e.to_string())?;
+    }
+    
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_lead(state: State<'_, DbState>, id: String) -> Result<(), String> {
+    let conn_guard = state.conn.lock().unwrap();
+    let conn = conn_guard.as_ref().ok_or("Database not initialized")?;
+    
+    conn.execute("DELETE FROM leads WHERE id = ?1", params![id]).map_err(|e| e.to_string())?;
     
     Ok(())
 }
@@ -150,8 +186,8 @@ pub fn import_csv_batch(state: State<'_, DbState>, leads: Vec<ImportLead>) -> Re
     for lead in leads {
         let id = uuid::Uuid::new_v4().to_string();
         let res = tx.execute(
-            "INSERT INTO leads (id, name, email, company, status) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![id, lead.name, lead.email, lead.company, lead.status],
+            "INSERT INTO leads (id, name, email, company, status, metadata) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![id, lead.name, lead.email, lead.company, lead.status, lead.metadata],
         );
         if res.is_ok() { count += 1; }
     }

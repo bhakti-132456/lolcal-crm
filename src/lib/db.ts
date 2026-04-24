@@ -7,6 +7,7 @@ export interface Lead {
   company: string;
   status: string;
   created_at: string;
+  metadata?: string;
 }
 
 export async function getLeads(): Promise<Lead[]> {
@@ -21,6 +22,10 @@ export async function importCsvBatch(leads: Omit<Lead, "id" | "created_at">[]): 
   return await invoke("import_csv_batch", { leads });
 }
 
-export async function updateLead(id: string, updates: { company?: string; status?: string }): Promise<void> {
+export async function updateLead(id: string, updates: { name?: string; email?: string; company?: string; status?: string; metadata?: string }): Promise<void> {
   return await invoke("update_lead", { id, ...updates });
+}
+
+export async function deleteLead(id: string): Promise<void> {
+  return await invoke("delete_lead", { id });
 }

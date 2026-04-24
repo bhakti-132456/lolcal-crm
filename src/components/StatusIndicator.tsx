@@ -4,7 +4,7 @@ import { Shield, Sparkles } from "lucide-react";
 
 export function StatusIndicator() {
   const [vaultStatus, setVaultStatus] = useState("Checking...");
-  const [aiMode, setAiMode] = useState<"Local" | "Cloud">("Local");
+  const [aiStatus, setAiStatus] = useState("Checking...");
 
   useEffect(() => {
     const checkVault = async () => {
@@ -17,16 +17,20 @@ export function StatusIndicator() {
     };
     checkVault();
     
-    // Check internet for AI Mode
-    const checkAI = () => {
-      setAiMode(navigator.onLine ? "Cloud" : "Local");
+    const checkAI = async () => {
+      try {
+        const status = await invoke<string>("get_brain_status");
+        setAiStatus(status);
+      } catch (e) {
+        setAiStatus("Offline");
+      }
     };
+    
     checkAI();
-    window.addEventListener("online", checkAI);
-    window.addEventListener("offline", checkAI);
+    const interval = setInterval(checkAI, 5000);
+    
     return () => {
-      window.removeEventListener("online", checkAI);
-      window.removeEventListener("offline", checkAI);
+      clearInterval(interval);
     };
   }, []);
 
@@ -38,9 +42,11 @@ export function StatusIndicator() {
         <span className={vaultStatus === "Sovereign" ? "text-blue-400" : "text-white"}>{vaultStatus}</span>
       </div>
       <div className="flex items-center gap-1.5">
-        <Sparkles className={`w-3 h-3 ${aiMode === "Local" ? "text-purple-400" : "text-amber-400"}`} />
+        <Sparkles className={`w-3 h-3 ${aiStatus === "Active" ? "text-purple-400" : (aiStatus === "Ollama Ready" ? "text-amber-400" : "text-gray-400")}`} />
         <span className="text-white/60">AI: </span>
-        <span className={aiMode === "Local" ? "text-purple-400" : "text-amber-400"}>{aiMode}</span>
+        <span className={aiStatus === "Active" ? "text-purple-400" : (aiStatus === "Ollama Ready" ? "text-amber-400" : "text-white/40")}>
+          {aiStatus}
+        </span>
       </div>
     </div>
   );

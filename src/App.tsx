@@ -17,7 +17,6 @@ import {
   Brain,
   MessageSquare,
   Send,
-  Loader2,
   X,
   ChevronDown
 } from "lucide-react";
@@ -45,10 +44,44 @@ function App() {
     setIsTyping(true);
 
     try {
-      const response = await ghostSyncPrompt(userMsg, selectedModel);
-      setChatHistory(prev => [...prev, { role: 'assistant', text: response }]);
-    } catch (e) {
-      setChatHistory(prev => [...prev, { role: 'assistant', text: "Error: AI Core offline. Start Ollama." }]);
+      // 1. FETCH CONTEXT (Pull latest info for the Brain)
+      let leadContext = "";
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const leads = await invoke<any[]>("get_leads");
+        leadContext = leads.slice(0, 50).map(l => `- ${l.name} (${l.company}): ${l.status}`).join("\n");
+      } catch (ce) {
+         console.warn("Could not fetch lead context for brain", ce);
+      }
+
+      // 2. TALK TO BRAIN
+      const response = await ghostSyncPrompt(userMsg, selectedModel, leadContext, chatHistory);
+      
+      // 3. ANIMATED TYPEWRITER EFFECT
+      const fullText = response || "Brain returned an empty response. Try a different prompt.";
+      let displayedText = "";
+      
+      // Add placeholder message for the assistant
+      setChatHistory(prev => [...prev, { role: 'assistant', text: "" }]);
+      
+      const words = fullText.split(' ');
+      for (let i = 0; i < words.length; i++) {
+        displayedText += (i === 0 ? '' : ' ') + words[i];
+        setChatHistory(prev => {
+          const updated = [...prev];
+          updated[updated.length - 1] = { role: 'assistant', text: displayedText };
+          return updated;
+        });
+        // Control typing speed (faster for longer messages)
+        await new Promise(r => setTimeout(r, Math.max(5, 50 - words.length))); 
+      }
+
+    } catch (e: any) {
+      console.error("AXON_CHAT_ERROR:", e);
+      setChatHistory(prev => [...prev, { 
+        role: 'assistant', 
+        text: `⚠️ [ERROR] Brain Access Fault: ${e?.message || e || "Unknown connection failure."}` 
+      }]);
     } finally {
       setIsTyping(false);
     }
@@ -201,17 +234,44 @@ function App() {
                       </p>
                    </div>
                  )}
-                 {chatHistory.map((m, i) => (
-                   <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-[85%] px-4 py-3 rounded-2xl text-xs leading-relaxed ${m.role === 'user' ? 'bg-blue-600 text-white shadow-lg' : 'bg-white/5 border border-white/10 text-white/80'}`}>
-                        {m.text}
+                  {chatHistory.map((m, i) => {
+                    const hasThought = m.text.includes('<thought>') && m.text.includes('</thought>');
+                    let thought = "";
+                    let finalAnswer = m.text;
+                    
+                    if (hasThought) {
+                      const match = m.text.match(/<thought>([\s\S]*?)<\/thought>/);
+                      if (match) {
+                        thought = match[1];
+                        finalAnswer = m.text.replace(/<thought>[\s\S]*?<\/thought>/, "").trim();
+                      }
+                    }
+
+                    return (
+                      <div key={i} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
+                         {m.role === 'assistant' && hasThought && (
+                           <details className="mb-2 w-full max-w-[85%] group">
+                             <summary className="text-[10px] text-white/30 cursor-pointer hover:text-white/60 transition-colors list-none flex items-center gap-2 bg-white/5 border border-white/5 px-3 py-1.5 rounded-lg w-fit">
+                               <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                               AXON Reasoning...
+                             </summary>
+                             <div className="mt-2 p-3 bg-white/[0.02] border-l border-blue-500/30 text-[10px] text-white/40 leading-relaxed font-mono rounded-r-lg">
+                               {thought}
+                             </div>
+                           </details>
+                         )}
+                         <div className={`max-w-[85%] px-4 py-3 rounded-2xl text-xs leading-relaxed ${m.role === 'user' ? 'bg-blue-600 text-white shadow-lg' : 'bg-white/5 border border-white/10 text-white/80'}`}>
+                           {finalAnswer || (m.role === 'assistant' ? "Thinking..." : "")}
+                         </div>
                       </div>
-                   </div>
-                 ))}
+                    );
+                  })}
                  {isTyping && (
                    <div className="flex justify-start">
-                      <div className="bg-white/5 border border-white/10 px-4 py-3 rounded-2xl">
-                        <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
+                      <div className="bg-white/5 border border-white/10 px-5 py-3 rounded-2xl flex gap-1 items-center">
+                        <span className="w-1 h-1 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                        <span className="w-1 h-1 bg-blue-400 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                        <span className="w-1 h-1 bg-blue-400 rounded-full animate-bounce"></span>
                       </div>
                    </div>
                  )}
