@@ -142,6 +142,7 @@ vite.config.ts.timestamp-*
 # AXON CRM Vault & Database
 axon_v1.db
 vault_backups/
+backups/
 AXON_VAULT/
 
 # Tauri Large files

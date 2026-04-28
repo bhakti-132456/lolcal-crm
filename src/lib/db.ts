@@ -29,3 +29,11 @@ export async function updateLead(id: string, updates: { name?: string; email?: s
 export async function deleteLead(id: string): Promise<void> {
   return await invoke("delete_lead", { id });
 }
+
+export async function bulkDeleteLeads(ids: string[]): Promise<number> {
+  return await invoke("bulk_delete_leads", { ids });
+}
+
+export async function bulkUpdateStatus(ids: string[], status: string): Promise<number> {
+  return await invoke("bulk_update_status", { ids, status });
+}

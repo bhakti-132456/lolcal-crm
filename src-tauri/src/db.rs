@@ -196,3 +196,39 @@ pub fn import_csv_batch(state: State<'_, DbState>, leads: Vec<ImportLead>) -> Re
     
     Ok(count)
 }
+
+#[tauri::command]
+pub fn bulk_delete_leads(state: State<'_, DbState>, ids: Vec<String>) -> Result<usize, String> {
+    let mut conn_guard = state.conn.lock().unwrap();
+    let conn = conn_guard.as_mut().ok_or("Database not initialized")?;
+    
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    
+    let mut count = 0;
+    for id in &ids {
+        let res = tx.execute("DELETE FROM leads WHERE id = ?1", params![id]);
+        if res.is_ok() { count += 1; }
+    }
+    
+    tx.commit().map_err(|e| e.to_string())?;
+    
+    Ok(count)
+}
+
+#[tauri::command]
+pub fn bulk_update_status(state: State<'_, DbState>, ids: Vec<String>, status: String) -> Result<usize, String> {
+    let mut conn_guard = state.conn.lock().unwrap();
+    let conn = conn_guard.as_mut().ok_or("Database not initialized")?;
+    
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    
+    let mut count = 0;
+    for id in &ids {
+        let res = tx.execute("UPDATE leads SET status = ?1 WHERE id = ?2", params![status, id]);
+        if res.is_ok() { count += 1; }
+    }
+    
+    tx.commit().map_err(|e| e.to_string())?;
+    
+    Ok(count)
+}

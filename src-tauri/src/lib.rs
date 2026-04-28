@@ -192,6 +192,8 @@ pub fn run() {
             db::update_lead,
             db::delete_lead,
             db::import_csv_batch,
+            db::bulk_delete_leads,
+            db::bulk_update_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

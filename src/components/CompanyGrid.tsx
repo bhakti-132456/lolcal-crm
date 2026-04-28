@@ -21,18 +21,36 @@ export function CompanyGrid({ onSelectRecord }: { onSelectRecord: (id: string) =
 
   if (isLoading) return <div className="p-12 text-blue-400 animate-pulse text-center font-mono">RETRIEVING CORPORATE RECORDS...</div>;
 
-  // Extract distinct companies from leads
+  // Extract distinct companies from leads (with metadata fallback)
   const companyMap = new Map();
   leads?.forEach(lead => {
-     if (lead.company) {
-         if (!companyMap.has(lead.company)) {
-             companyMap.set(lead.company, { name: lead.company, leads: [] });
-         }
-         companyMap.get(lead.company).leads.push(lead);
+     let companyName = lead.company?.trim() || "";
+     
+     // Fallback: try to extract company from metadata if field is empty
+     if (!companyName && lead.metadata) {
+       try {
+         const md = JSON.parse(lead.metadata);
+         companyName = md.company || md.Company || md['Company Name'] || md.company_name 
+           || md.Organization || md.organization || md['Organization Name'] || md.organisation
+           || md.Employer || md.employer || md.Business || md.business || "";
+       } catch (e) {}
      }
+     
+     // Final fallback
+     if (!companyName) companyName = "Unassigned";
+     
+     if (!companyMap.has(companyName)) {
+         companyMap.set(companyName, { name: companyName, leads: [] });
+     }
+     companyMap.get(companyName).leads.push(lead);
   });
 
-  const companies = Array.from(companyMap.values());
+  // Sort: put "Unassigned" at the end, then alphabetical
+  const companies = Array.from(companyMap.values()).sort((a, b) => {
+    if (a.name === 'Unassigned') return 1;
+    if (b.name === 'Unassigned') return -1;
+    return a.name.localeCompare(b.name);
+  });
 
   const filtered = companies.filter(c => 
     c.name.toLowerCase().includes(search.toLowerCase())
@@ -64,7 +82,7 @@ export function CompanyGrid({ onSelectRecord }: { onSelectRecord: (id: string) =
               className="bg-studio-noir border border-white/5 hover:border-blue-500/30 rounded-2xl p-6 transition-all group cursor-pointer hover:shadow-2xl hover:shadow-blue-500/5 shadow-xl"
             >
               <div className="flex items-start justify-between mb-6">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500/10 to-purple-500/10 flex items-center justify-center border border-white/10 text-blue-400 shadow-inner">
+                <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${company.name === 'Unassigned' ? 'from-white/5 to-white/5' : 'from-blue-500/10 to-purple-500/10'} flex items-center justify-center border border-white/10 text-blue-400 shadow-inner`}>
                   <Building2 className="w-6 h-6" />
                 </div>
               </div>
@@ -72,14 +90,24 @@ export function CompanyGrid({ onSelectRecord }: { onSelectRecord: (id: string) =
               <h3 className="text-lg font-bold text-white mb-1 group-hover:text-blue-400 transition-colors uppercase tracking-tight">{company.name}</h3>
               <div className="flex items-center gap-2 text-xs text-white/30 mb-6 font-mono">
                 <Globe className="w-3.5 h-3.5" />
-                <span>Derived from Contacts</span>
+                <span>
+                  {(() => {
+                    // Show unique statuses as a summary
+                    const statuses = company.leads.reduce((acc: Record<string, number>, l: any) => {
+                      const s = l.status || 'New';
+                      acc[s] = (acc[s] || 0) + 1;
+                      return acc;
+                    }, {});
+                    return Object.entries(statuses).map(([s, c]) => `${c} ${s}`).join(' · ');
+                  })()}
+                </span>
               </div>
 
               <div className="pt-6 border-t border-white/5 flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   <div className="flex items-center gap-1.5 text-[10px] text-white/40 font-bold uppercase tracking-widest">
                     <Users className="w-3.5 h-3.5 text-blue-400" />
-                    <span>{company.leads.length} Leads</span>
+                    <span>{company.leads.length} {company.leads.length === 1 ? 'Lead' : 'Leads'}</span>
                   </div>
                 </div>
                 <ChevronRight className="w-4 h-4 text-white/10 group-hover:text-blue-400 transition-all translate-x-0 group-hover:translate-x-1" />
